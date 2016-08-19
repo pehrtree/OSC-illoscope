@@ -10,9 +10,26 @@
 */
 
 import oscP5.*;
+final int WIDTH = 1280;
+final int HEIGHT = 800;
 
 float[] channelMax;
 float[] channelMin;
+
+float plotMax=750;
+float plotMin=-plotMax;  // keep it square and balanced by default
+
+String plotXLabel="X";
+String plotYLabel="Y";
+
+
+boolean newPlotPoint = false;
+float lastPlotX = 0;
+float lastPlotY = 0;
+
+float plotMinX, plotMinY, plotMaxX,plotMaxY; // find the centroid
+ float plotCenterX; 
+    float plotCenterY; 
 
 int[] selectedChannels;// made in setupForSize// = { 1,2,3,4 };
 //int[] selectedChannels = { 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -32,6 +49,7 @@ PFont valFont;
 
 final int SCOPE_PORT = 8967; 
 final String SCOPE_HOST = "EISM-AM02035509.local";
+
 
 void setupForSize(int n){
   if(n <=0){ n = 1;}
@@ -59,7 +77,7 @@ void setup() {
     setupForSize(3);
 
   oscP5 = new OscP5(this, SCOPE_HOST,SCOPE_PORT, OscP5.UDP);  
-  size(1280, 720);
+  size(1280,720);
   if (frame != null) {
     frame.setResizable(true);
   }
@@ -74,8 +92,11 @@ void setup() {
 }
 boolean gotLabels = false;
 
-void draw() {
-  fill(0);
+final int MODE_SCOPE = 0;
+final int MODE_PLOT = 1;
+int mode = MODE_SCOPE;
+
+void drawScope(){
   // draw black on side for values 
   noStroke();
   rect(width-80,0,80,height);
@@ -107,7 +128,7 @@ void draw() {
       fill(channelColors[i]);
     }
     // red or blue if out of range
-     text(String.format("%2.1f",val), width - 76 , (i + 0.5) * graphHeight); // middle
+     text(String.format("%2.2f",val), width - 76 , (i + 0.5) * graphHeight); // middle
      
      
   // ranges are dimmer 
@@ -124,6 +145,115 @@ stroke(255); // default white
     restart();
    
   }
+}
+
+final int PLOT_MARGIN = 32;
+
+void drawPlot(){
+  if(!newPlotPoint){ return; }  // NOP
+  noStroke();
+  fill(0);
+  // black out previous text area
+  rect(0,0,width,PLOT_MARGIN-1);
+  rect(0,height-PLOT_MARGIN,width,PLOT_MARGIN+1);
+  
+  if(lastPlotX < plotMin || lastPlotY < plotMin){
+    fill(0,0,200);
+  }else if(lastPlotX > plotMax || lastPlotY > plotMax){
+    fill(200,0,0);
+  }else{
+      fill(255,64);//translucent
+  }
+
+  noStroke();
+  float w = plotWidth();
+  pushMatrix();
+ 
+  translate(PLOT_MARGIN,PLOT_MARGIN);
+   float xPos = map(lastPlotX, plotMin, plotMax, 0,w );
+   float yPos = map(lastPlotY, plotMin, plotMax, 0,w);
+   ellipse(xPos,yPos, 4,4);
+  
+  
+    // red or blue if out of range
+  text(String.format("%2.2f, %2.2f",lastPlotX,lastPlotY), 0.5*w, -0.5*PLOT_MARGIN  ); // top middle
+     
+  fill(200);
+  
+    text(String.format("%2.2f, %.2f",plotMin,plotMin), -20,-20); 
+    
+     text(String.format("%2.2f, %.2f",plotMax,plotMax),w-2*PLOT_MARGIN ,w + 20); 
+
+// display current centroid
+
+ 
+
+     text(String.format("center %2.2f, %.2f",plotCenterX,plotCenterY),0.5*w-8 ,w + 0.5*PLOT_MARGIN); 
+
+
+
+  popMatrix();
+  
+
+
+
+
+
+}
+
+float plotWidth(){
+  return  min(width,height) - 2*PLOT_MARGIN;
+}
+
+void drawPlotBackground(){
+  background(0);
+  
+  
+  PFont f = createFont("Arial", 16, true);  // Arial, 16 point, anti-aliasing on
+  textFont(f, 18); 
+  
+  strokeWeight(1);
+  noFill();
+  stroke(100);
+  pushMatrix();
+  translate(PLOT_MARGIN,PLOT_MARGIN);
+     float w = plotWidth();
+     rect(0,0,w,w);
+     
+    fill(0,200,0);
+    ellipse(0.5f*w,0.5f*w,5,5); // mark the center. 0,0 if plot min,max are opposites
+
+    ellipse(0,w,5,5);
+    
+        ellipse(w,w,5,5);
+
+
+    ellipse(0,0,5,5);
+
+    ellipse(w,0,5,5);
+
+  popMatrix();
+  
+  
+      float y = 100;
+   
+    fill(0);
+    
+    text("X= "+plotXLabel, w+PLOT_MARGIN, y); 
+    text("Y= "+plotYLabel, w+PLOT_MARGIN, y+20); 
+    text("YTEST", 600,600); 
+
+}
+
+void draw() {
+  fill(0);
+  if(mode == MODE_SCOPE){
+    drawScope();
+  }else{
+    drawPlot();
+    
+  }
+  
    
 }
 
@@ -133,12 +263,23 @@ void restart(){
     xPos = 0;
     drawBackground();
     gotLabels=false;
+    
+    plotMinX=  0xFFFF;
+    plotMinY=  0xFFFF; 
+    plotMaxX= -0xFFFF;
+    plotMaxY= -0xFFFF;
+
 }
-void drawBackground() {
+
+void drawScopeBackground(){
+  
   strokeWeight(1);                          // rectangle border width
+  float graphHeight = height / selectedChannels.length;
+
   PFont f = createFont("Arial", 16, true);  // Arial, 16 point, anti-aliasing on
+  textFont(f, (int)(0.5*graphHeight)); // big text in bg
+
   for (int i = 0; i < selectedChannels.length; i++) {
-    float graphHeight = height / selectedChannels.length;
 
     // Different rectangle border and fill colour for alternate graphs
     if(i % 2 == 0) {
@@ -153,12 +294,22 @@ void drawBackground() {
 
     // Print channel number
     fill(64);
-    textFont(f, (int)(0.5*graphHeight)); // big text in bg
     String lbl = nf(selectedChannels[i], 1) + " " + labels[i];
     text(lbl, 10, (i + 1) * graphHeight);
     
 
   }
+}
+
+
+
+void drawBackground() {
+  if(mode == MODE_SCOPE){
+    drawScopeBackground();
+  }else if(mode == MODE_PLOT){
+    drawPlotBackground(); 
+  }
+  
 }
 
 void oscEvent(OscMessage theOscMessage) {
@@ -202,11 +353,44 @@ void oscEvent(OscMessage theOscMessage) {
     }else{
       println("ERROR bad chan "+chanNum);
     }
+  }else if(addrPattern.equals("/inputs/xy")){
+    
+   
+    newPlotPoint = true;
+    lastPlotX = theOscMessage.get(0).floatValue();
+    lastPlotY =  theOscMessage.get(1).floatValue();
+    
+    updatePlotCentroid();
+  }else if(addrPattern.equals("/inputs/xysetup")){
+    plotXLabel = theOscMessage.get(0).stringValue();
+    plotYLabel = theOscMessage.get(1).stringValue();
+    plotMin = theOscMessage.get(2).floatValue();
+    plotMax = theOscMessage.get(3).floatValue();
+
+
   }
+}
+
+void updatePlotCentroid(){
+    if(lastPlotX < plotMinX)
+          plotMinX=lastPlotX;
+     if(lastPlotY < plotMinY)
+          plotMinY=lastPlotY;
+          
+      if(lastPlotX > plotMaxX)
+          plotMaxX=lastPlotX; 
+          
+       if(lastPlotY > plotMaxY)
+          plotMaxY=lastPlotY;    
+       
+    plotCenterX = 0.5 * (plotMinX + plotMaxX);
+    plotCenterY = 0.5 * (plotMinY + plotMaxY);
+ 
 }
 
 boolean paused = false;
 void keyPressed(){
+  int lastMode = mode;
   switch(key){
      case 'q':
      println("SCREENSHOT");
@@ -225,6 +409,12 @@ void keyPressed(){
      restart();
      break;
      
+     case '1': println("SCOPE");mode = MODE_SCOPE; break;
+     case '2': println("PLOT");mode = MODE_PLOT; break;
+
+     
   }
+  
+  if(mode != lastMode){ restart();}
       
 }
